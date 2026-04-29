@@ -20,7 +20,7 @@ if len(sys.argv) < 2:
 
 Commands:
   init                          Initialize a new repository
-  add <file>                    Stage a single file
+  add .                         Stage all files
   commit -m \"message\"          Create a commit
   status                        Show repository status
   log                           Show commit history
@@ -45,11 +45,10 @@ if command == "init":
     print(result["message"])
 
 elif command == "add":
-    if len(sys.argv) < 3:
-        print("Usage: vcs add <file>  or  vcs add .")
+    if len(sys.argv) < 3 or sys.argv[2] != ".":
+        print("Usage: vcs add .")
     else:
-        target = sys.argv[2]
-        result = add_files(target)
+        result = add_files()
         print(result["message"], "-", result.get("count", 0), "files")
 
 elif command == "commit":

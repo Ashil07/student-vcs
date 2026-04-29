@@ -2,11 +2,11 @@ import os
 import json
 import zipfile
 from datetime import datetime
+from core.db import ensure_repo, DB_PATH
 
-VCS_DIR = ".myvcs"
 
 def export_repo(output_file):
-    if not os.path.exists(VCS_DIR):
+    if not ensure_repo():
         return {
             "success": False,
             "message": "Not a VCS repository"
@@ -14,16 +14,15 @@ def export_repo(output_file):
 
     with zipfile.ZipFile(output_file, "w", zipfile.ZIP_DEFLATED) as zipf:
 
-        # metadata
         meta = {
             "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "format": "student-vcs-v1"
+            "format": "student-vcs-v2",
+            "has_db": True
         }
 
         zipf.writestr("meta.json", json.dumps(meta, indent=2))
 
-        # pack .myvcs contents
-        for root, dirs, files in os.walk(VCS_DIR):
+        for root, dirs, files in os.walk(".myvcs"):
             for name in files:
                 full_path = os.path.join(root, name)
                 arc_name = os.path.join("repo", full_path)

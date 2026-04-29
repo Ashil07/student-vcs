@@ -1,10 +1,6 @@
 import os
-import json
+from core.db import VCS_DIR, OBJECTS_DIR, init_db, get_db, set_config, set_current_branch
 
-VCS_DIR = ".myvcs"
-OBJECTS_DIR = ".myvcs/objects"
-INDEX_FILE = ".myvcs/index.json"
-COMMITS_FILE = ".myvcs/commits.json"
 
 def init_repo():
     if os.path.exists(VCS_DIR):
@@ -16,13 +12,16 @@ def init_repo():
     os.mkdir(VCS_DIR)
     os.mkdir(OBJECTS_DIR)
 
-    file = open(INDEX_FILE, "w")
-    file.write("{}")
-    file.close()
+    init_db()
 
-    file = open(COMMITS_FILE, "w")
-    file.write("[]")
-    file.close()
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute("INSERT INTO branches (name, commit_id, is_current) VALUES (?, NULL, 1)", ("main",))
+    db.commit()
+    db.close()
+
+    set_config("created", "true")
 
     return {
         "success": True,

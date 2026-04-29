@@ -2,62 +2,65 @@ import os
 import json
 import hashlib
 from datetime import datetime
+from core.db import get_db, ensure_repo, get_current_branch, get_branch_commit, set_branch_commit
 
-VCS_DIR = ".myvcs"
-INDEX_FILE = ".myvcs/index.json"
-COMMITS_FILE = ".myvcs/commits.json"
 
 def make_commit(message):
-    if not os.path.exists(VCS_DIR):
+    if not ensure_repo():
         return {
             "success": False,
             "message": "Not a VCS repository"
         }
 
-    # load index
-    file = open(INDEX_FILE, "r")
-    index_data = json.load(file)
-    file.close()
+    db = get_db()
+    cursor = db.cursor()
 
-    if len(index_data) == 0:
+    cursor.execute("SELECT file_path, file_hash FROM staging")
+    staged = cursor.fetchall()
+
+    if len(staged) == 0:
+        db.close()
         return {
             "success": False,
-            "message": "No files to commit"
+            "message": "No files staged. Use 'vcs add .' first."
         }
 
-    # load commits
-    if os.path.exists(COMMITS_FILE):
-        file = open(COMMITS_FILE, "r")
-        commits = json.load(file)
-        file.close()
-    else:
-        commits = []
-
-    parent_id = None
-    if len(commits) > 0:
-        parent_id = commits[-1]["id"]
+    branch_name = get_current_branch()
+    parent_id = get_branch_commit(branch_name)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    raw = message + timestamp + str(parent_id)
+    raw = message + timestamp + str(parent_id) + branch_name
     commit_id = hashlib.sha1(raw.encode()).hexdigest()[:7]
 
-    commit = {
-        "id": commit_id,
-        "message": message,
-        "timestamp": timestamp,
-        "parent": parent_id,
-        "files": index_data
-    }
+    parent_ids = [parent_id] if parent_id else []
 
-    commits.append(commit)
+    cursor.execute(
+        "INSERT INTO commits (id, message, timestamp, parent_ids, branch_id) VALUES (?, ?, ?, ?, (SELECT id FROM branches WHERE name = ?))",
+        (commit_id, message, timestamp, json.dumps(parent_ids), branch_name)
+    )
 
-    file = open(COMMITS_FILE, "w")
-    json.dump(commits, file, indent=2)
-    file.close()
+    for row in staged:
+        cursor.execute(
+            "INSERT INTO commit_files (commit_id, file_path, file_hash) VALUES (?, ?, ?)",
+            (commit_id, row["file_path"], row["file_hash"])
+        )
+
+    cursor.execute("DELETE FROM staging")
+
+    db.commit()
+    db.close()
+
+    set_branch_commit(branch_name, commit_id)
 
     return {
         "success": True,
         "message": "Commit created",
-        "commit": commit
+        "commit": {
+            "id": commit_id,
+            "message": message,
+            "timestamp": timestamp,
+            "branch": branch_name,
+            "parent_ids": parent_ids
+        }
     }

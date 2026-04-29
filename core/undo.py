@@ -1,50 +1,65 @@
 import os
-import json
+import shutil
+from core.db import get_db, ensure_repo, get_current_branch, get_branch_commit, set_branch_commit
 
-COMMITS_FILE = ".myvcs/commits.json"
-OBJECTS_DIR = ".myvcs/objects"
 
 def undo_last_commit():
-    if not os.path.exists(COMMITS_FILE):
+    if not ensure_repo():
+        return {
+            "success": False,
+            "message": "Not a VCS repository"
+        }
+
+    db = get_db()
+    cursor = db.cursor()
+
+    branch_name = get_current_branch()
+    current_commit_id = get_branch_commit(branch_name)
+
+    if not current_commit_id:
+        db.close()
         return {
             "success": False,
             "message": "No commits to undo"
         }
 
-    file = open(COMMITS_FILE, "r")
-    commits = json.load(file)
-    file.close()
+    cursor.execute("SELECT parent_ids FROM commits WHERE id = ?", (current_commit_id,))
+    row = cursor.fetchone()
+    if not row:
+        db.close()
+        return {
+            "success": False,
+            "message": "Commit not found"
+        }
 
-    if len(commits) < 2:
+    import json
+    parent_ids = json.loads(row["parent_ids"])
+
+    if not parent_ids:
+        db.close()
         return {
             "success": False,
             "message": "Cannot undo the first commit"
         }
 
-    # remove last commit
-    commits.pop()
+    parent_id = parent_ids[0]
 
-    previous_commit = commits[-1]
-    files = previous_commit["files"]
+    cursor.execute("DELETE FROM commits WHERE id = ?", (current_commit_id,))
+    db.commit()
 
-    # restore files
-    for path, file_hash in files.items():
-        object_path = os.path.join(OBJECTS_DIR, file_hash)
+    set_branch_commit(branch_name, parent_id)
 
+    cursor.execute("SELECT file_path, file_hash FROM commit_files WHERE commit_id = ?", (parent_id,))
+    files = cursor.fetchall()
+    db.close()
+
+    for row in files:
+        object_path = os.path.join(".myvcs/objects", row["file_hash"])
         if os.path.exists(object_path):
-            src = open(object_path, "rb")
-            dst = open(path, "wb")
-            dst.write(src.read())
-            src.close()
-            dst.close()
-
-    # save updated commits
-    file = open(COMMITS_FILE, "w")
-    json.dump(commits, file, indent=2)
-    file.close()
+            shutil.copy2(object_path, row["file_path"])
 
     return {
         "success": True,
         "message": "Last commit undone",
-        "current_commit": previous_commit["id"]
+        "current_commit": parent_id
     }

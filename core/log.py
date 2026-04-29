@@ -1,28 +1,28 @@
-import os
 import json
+from core.db import get_db, ensure_repo
 
-COMMITS_FILE = ".myvcs/commits.json"
 
 def get_log():
-    if not os.path.exists(COMMITS_FILE):
+    if not ensure_repo():
         return {
             "success": False,
             "message": "No commits found"
         }
 
-    file = open(COMMITS_FILE, "r")
-    commits = json.load(file)
-    file.close()
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM commits ORDER BY timestamp DESC")
+    rows = cursor.fetchall()
+    db.close()
 
     history = []
-
-    # latest commit first (better for UI)
-    for commit in reversed(commits):
+    for row in rows:
         history.append({
-            "id": commit["id"],
-            "message": commit["message"],
-            "timestamp": commit["timestamp"],
-            "parent": commit["parent"]
+            "id": row["id"],
+            "message": row["message"],
+            "timestamp": row["timestamp"],
+            "parent_ids": json.loads(row["parent_ids"]),
+            "branch_id": row["branch_id"]
         })
 
     return {

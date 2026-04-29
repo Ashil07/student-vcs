@@ -1,50 +1,53 @@
 import os
-import json
-from core.hasher import hash_file
+from core.hasher import hash_file, atomic_copy
+from core.db import OBJECTS_DIR, get_db, ensure_repo
 
-VCS_DIR = ".myvcs"
-OBJECTS_DIR = ".myvcs/objects"
-INDEX_FILE = ".myvcs/index.json"
 
-def add_files():
-    if not os.path.exists(VCS_DIR):
+def add_files(target="."):
+    if not ensure_repo():
         return {
             "success": False,
             "message": "Not a VCS repository"
         }
 
-    file = open(INDEX_FILE, "r")
-    index_data = json.load(file)
-    file.close()
+    db = get_db()
+    cursor = db.cursor()
 
+    if target == ".":
+        cursor.execute("DELETE FROM staging")
     added_files = []
 
-    for root, dirs, files in os.walk("."):
-        if ".myvcs" in root:
-            continue
+    def _stage_file(path):
+        if not os.path.exists(path) or os.path.isdir(path):
+            return
+        if os.path.basename(path) in (".vcsignore", ".gitignore"):
+            return
+        if ".myvcs" in path or ".git" in path:
+            return
+        file_hash = hash_file(path)
+        object_path = os.path.join(OBJECTS_DIR, file_hash)
+        if not os.path.exists(object_path):
+            atomic_copy(path, object_path)
+        cursor.execute(
+            "INSERT OR REPLACE INTO staging (file_path, file_hash) VALUES (?, ?)",
+            (path, file_hash)
+        )
+        added_files.append(path)
 
-        for name in files:
-            if name == ".vcsignore":
+    if target == ".":
+        for root, dirs, files in os.walk("."):
+            if ".myvcs" in root or ".git" in root:
                 continue
+            for name in files:
+                if name in (".vcsignore", ".gitignore"):
+                    continue
+                path = os.path.join(root, name)
+                _stage_file(path)
+    else:
+        _stage_file(target)
 
-            path = os.path.join(root, name)
-
-            file_hash = hash_file(path)
-            object_path = OBJECTS_DIR + "/" + file_hash
-
-            if not os.path.exists(object_path):
-                src = open(path, "rb")
-                dst = open(object_path, "wb")
-                dst.write(src.read())
-                src.close()
-                dst.close()
-
-            index_data[path] = file_hash
-            added_files.append(path)
-
-    file = open(INDEX_FILE, "w")
-    json.dump(index_data, file, indent=2)
-    file.close()
+    db.commit()
+    db.close()
 
     return {
         "success": True,
